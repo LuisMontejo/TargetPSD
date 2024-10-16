@@ -24,7 +24,7 @@ The following is a list of the functions included in the module:
 
 *PSDFFTEq: Calculates the power spectral density of earthquake acceleration time-series, FFT is normalized by dt, FFT/PSD is calculated over the strong motion duration returns the one-sided PSD and a "smoothed" version by taking the average over a frequency window width of user defined % of the subject frequency.
 
-* FASPSAratio: Target FAS based on empirical relationship between Fourier and response spectra (Montejo & Vidot-Vega, 2017)
+*FASPSAratio: Target FAS based on empirical relationship between Fourier and response spectra (Montejo & Vidot-Vega, 2017)
   
 *SignificantDuration: Estimates significant duration and Arias Intensity
 
