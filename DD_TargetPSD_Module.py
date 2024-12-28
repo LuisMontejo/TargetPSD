@@ -47,16 +47,14 @@ response spectra (Montejo & Vidot-Vega, 2017)
 
 *SignificantDuration: Estimates significant duration and Arias Intensity
 
-*RSFD: Response spectra (operations in the frequency domain)
+*RSFD_S: Response spectra (operations in the frequency domain)
 
 * log_interp: Performs logarithmic interpolation
 
 * saragoni_hart_w: returns a Saragoni-Hart type of window
 
 '''
-
-
-def FASPSAcomps(nt,envelope,m,dt,TaFAS,T):
+def FASPSAcomps(nt,envelope,m,dt,TaFAS,T,zi):
     import numpy as np
     so = np.random.randn(nt) # generates the synthetic signal
     so = envelope*so
@@ -66,7 +64,7 @@ def FASPSAcomps(nt,envelope,m,dt,TaFAS,T):
     fsymm = np.concatenate((ff, ff[-2:0:-1]))
     FS = fsymm * FSo # modified Fourier coefficients
     sc = np.fft.ifft(FS).real # FAS compatible signal
-    PSArecord, _, _, _, _= RSFD(T, sc, 0.05, dt) # calculates PSA 
+    PSArecord, _, _= RSFD_S(T, sc, zi, dt) # calculates PSA 
     return PSArecord
 
 def PSDFAScomps(nt,envelope,m,dt,TFASfin,fs):
@@ -82,7 +80,7 @@ def PSDFAScomps(nt,envelope,m,dt,TFASfin,fs):
     _,PSDfinrecord,PSDavgfinrecord,_,sdfinrecord,_,_,_= PSDFFTEq(s,fs,alphaw=0.1,duration=(5,75),nFFT='same',basefornFFT = 0, overlap=20, detrend='linear')
     return PSDfinrecord,PSDavgfinrecord,sdfinrecord
 
-def DDTargetPSD_MP(filename,sd575,TargetSpectrumName,F1=0.2,F2=50,
+def DDTargetPSD_MP(filename,sd575,TargetSpectrumName,zi=0.05,F1=0.2,F2=50,
                 allow_err=2.5,neqsPSD=1000,plots=1):
     '''
     Generates a strong motion duration dependent target PSD compatible with a
@@ -99,6 +97,8 @@ def DDTargetPSD_MP(filename,sd575,TargetSpectrumName,F1=0.2,F2=50,
     sd575 :     float, target sd5-75 [s]
     
     TargetSpectrumName : string, name used to generate the output files
+    
+    zi: float, dampinf ratio for response spectrum
     
     F1 : float, lowest frequency to check PSA match [Hz]. The default is 0.2.
     
@@ -202,7 +202,7 @@ def DDTargetPSD_MP(filename,sd575,TargetSpectrumName,F1=0.2,F2=50,
         TaFAS = FAStarget[:,k]
         
         with concurrent.futures.ProcessPoolExecutor() as executor:
-            PSAallrecords = [executor.submit(FASPSAcomps,*[nt,envelope,m,dt,TaFAS,T]) for _ in range(sets[k])]
+            PSAallrecords = [executor.submit(FASPSAcomps,*[nt,envelope,m,dt,TaFAS,T,zi]) for _ in range(sets[k])]
         
         q=0
         for PSAsinglerecord in PSAallrecords:
@@ -252,7 +252,7 @@ def DDTargetPSD_MP(filename,sd575,TargetSpectrumName,F1=0.2,F2=50,
     
     with concurrent.futures.ProcessPoolExecutor() as executor:
         allrecords = [executor.submit(PSDFAScomps,*[nt,envelope,m,dt,TFASfin,fs]) for _ in range(neqsPSD)]
-    
+
     q=0
     for singlerecord in allrecords:
         PSDfin[:,q]=singlerecord.result()[0]
@@ -317,7 +317,7 @@ def DDTargetPSD_MP(filename,sd575,TargetSpectrumName,F1=0.2,F2=50,
     
     return freqs,PSDrecordsavg_avgfin,TFASfin
 
-def DDTargetPSD(filename,sd575,TargetSpectrumName,F1=0.2,F2=50,
+def DDTargetPSD(filename,sd575,TargetSpectrumName,zi=0.05,F1=0.2,F2=50,
                 allow_err=2.5,neqsPSD=1000,plots=1):
     '''
     Generates a strong motion duration dependent target PSD compatible with a
@@ -334,6 +334,8 @@ def DDTargetPSD(filename,sd575,TargetSpectrumName,F1=0.2,F2=50,
     sd575 :     float, target sd5-75 [s]
     
     TargetSpectrumName : string, name used to generate the output files
+    
+    zi : float, damping ratio for response spectrum
     
     F1 : float, lowest frequency to check PSA match [Hz]. The default is 0.2.
     
@@ -442,7 +444,7 @@ def DDTargetPSD(filename,sd575,TargetSpectrumName,F1=0.2,F2=50,
             fsymm = np.concatenate((ff, ff[-2:0:-1]))
             FS = fsymm * FSo # modified Fourier coefficients
             sc = np.fft.ifft(FS).real # FAS compatible signal
-            PSA[:,q], _, _, _, _= RSFD(T, sc, 0.05, dt) # calculates PSA 
+            PSA[:,q], _, _= RSFD_S(T, sc, zi, dt) # calculates PSA 
     
         PSAavg[:,k] = np.mean(PSA,axis=1) # takes average PSA per set
         diflimits = np.abs(ds[locs]-PSAavg[locs,k])/ds[locs]
@@ -554,10 +556,12 @@ def DDTargetPSD(filename,sd575,TargetSpectrumName,F1=0.2,F2=50,
     
     return freqs,PSDrecordsavg_avgfin,TFASfin
 
-def RSFD(T,s,z,dt):
+def RSFD_S(T,s,z,dt):
     '''   
-    Response spectra (operations in the frequency domain)
+    luis.montejo@upr.edu 
     
+    Response spectra (operations in the frequency domain)
+    Faster than RSFD as only computes PSA, PSV, SD
     Input:
         T: vector with periods (s)
         s: acceleration time series
@@ -565,7 +569,7 @@ def RSFD(T,s,z,dt):
         dt: time steps for s
     
     Returns:
-        PSA, PSV, SA, SV, SD
+        PSA, PSV, SD
     
     '''
     import numpy as np
@@ -576,8 +580,7 @@ def RSFD(T,s,z,dt):
     npo = np.size(s)
     nT  = np.size(T)
     SD  = np.zeros(nT)
-    SV  = np.zeros(nT)
-    SA  = np.zeros(nT)
+
     
     n = int(2**np.ceil(np.log2(npo+10*np.max(T)/dt)))  # add zeros to provide enough quiet time
     fs=1/dt;
@@ -594,35 +597,21 @@ def RSFD(T,s,z,dt):
         w = 2*pi/T[kk] ; k=m*w**2; c = 2*z*m*w
         
         H1 = 1       / ( -m*ww**2 + k + 1j*c*ww )  # Transfer function (half) - Receptance
-        H2 = 1j*ww   / ( -m*ww**2 + k + 1j*c*ww )  # Transfer function (half) - Mobility
-        H3 = -ww**2  / ( -m*ww**2 + k + 1j*c*ww )  # Transfer function (half) - Accelerance
         
         H1 = np.append(H1,np.conj(H1[n//2-1:0:-1]))
         H1[n//2] = np.real(H1[n//2])     # Transfer function (complete) - Receptance
         
-        H2 = np.append(H2,np.conj(H2[n//2-1:0:-1]))
-        H2[n//2] = np.real(H2[n//2])     # Transfer function (complete) - Mobility
-        
-        H3 = np.append(H3,np.conj(H3[n//2-1:0:-1]))
-        H3[n//2] = np.real(H3[n//2])     # Transfer function (complete) - Accelerance
         
         CoF1 = H1*ffts   # frequency domain convolution
         d = ifft(CoF1)   # go back to the time domain (displacement)
         SD[kk] = np.max(np.abs(d))
             
-        CoF2 = H2*ffts   # frequency domain convolution
-        v = ifft(CoF2)   # go back to the time domain (velocity)
-        SV[kk] = np.max(np.abs(v))
-        
-        CoF3 = H3*ffts   # frequency domain convolution
-        a = ifft(CoF3)   # go back to the time domain (acceleration)
-        a = a - s
-        SA[kk] = np.max(np.abs(a))
     
     PSV = (2*pi/T)* SD
     PSA = (2*pi/T)**2 * SD
     
-    return PSA, PSV, SA, SV, SD
+    return PSA, PSV, SD
+
 
 
 def SignificantDuration(s,t,ival=5,fval=75):
@@ -657,7 +646,7 @@ def SignificantDuration(s,t,ival=5,fval=75):
 
     '''
     from scipy import integrate
-    AIcum = integrate.cumtrapz(s**2, t, initial=0)
+    AIcum = integrate.cumulative_trapezoid(s**2, t, initial=0)
     AI = AIcum[-1]
     AIcumnorm = AIcum/AI
     t_strong = t[(AIcumnorm>=ival/100)&(AIcumnorm<=fval/100)]
@@ -806,10 +795,6 @@ def PSDFFTEq(so,fs,alphaw=0.1,duration=(5,75),nFFT='nextpow2',basefornFFT = 0, o
     return mags,PSD,PSDavg,freqs,sd,AI,t1,t2
 
 
-
-
-
-
 def log_interp(x, xp, fp):
     import numpy as np
     logx = np.log10(x)
@@ -867,4 +852,3 @@ def saragoni_hart_w(npoints,eps=0.25,n=0.4,tn=0.6):
     w = a*(t/tn)**b*np.exp(-c*(t/tn))
     
     return w
-
